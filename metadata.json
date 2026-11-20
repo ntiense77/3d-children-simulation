@@ -1,0 +1,6 @@
+{
+  "name": "Hello World",
+  "description": "A minimal editorial Hello World specimen page celebrating the classic first greeting across languages and computing history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
