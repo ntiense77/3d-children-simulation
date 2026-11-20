@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { groups, learners } from './learners.js';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  groups,
+  learners,
+  QUESTION_PROMPTS,
+  QUESTION_RESPONDENT_IDS,
+} from './learners.js';
 import { ClassroomStage } from './scene/ClassroomStage';
 import { soundEngine } from './scene/soundEffects';
 
@@ -24,6 +29,8 @@ function Icon({ name, size = 20 }) {
     chevronDown: <path d="m6 9 6 6 6-6"/>,
     chevronUp: <path d="m18 15-6-6-6 6"/>,
     camera: <><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>,
+    edit: <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></>,
+    close: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -51,6 +58,22 @@ function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [notice, setNotice] = useState('');
 
+  // Q&A, Teacher-Student interaction & Chalkboard state
+  const [promptIndex, setPromptIndex] = useState(0);
+  const [qaActive, setQaActive] = useState(false);
+  const [answeredInRound, setAnsweredInRound] = useState([]);
+  const [answeringStudentId, setAnsweringStudentId] = useState(null);
+  const [lastAnsweredId, setLastAnsweredId] = useState(null);
+  const [teacherTalking, setTeacherTalking] = useState(false);
+  const [dialogue, setDialogue] = useState(null);
+  const [boardTask, setBoardTask] = useState(null);
+  const [boardHistory, setBoardHistory] = useState([]);
+  const [classPoints, setClassPoints] = useState(0);
+
+  const boardKeyRef = useRef(1);
+  const answerTimerRef = useRef(null);
+  const teacherTalkTimerRef = useRef(null);
+
   const placedCount = Object.keys(assignments).length;
   const seatedCount = learners.length - placedCount;
   const membersFor = useCallback(
@@ -59,14 +82,29 @@ function App() {
   );
   const isComplete = groups.every((group) => membersFor(group.id).length === 5) && placedCount === 20;
 
+  const raisedHandIds = useMemo(
+    () => (qaActive ? QUESTION_RESPONDENT_IDS.filter((id) => !answeredInRound.includes(id)) : []),
+    [qaActive, answeredInRound],
+  );
+
+  const activePrompt = QUESTION_PROMPTS[promptIndex % QUESTION_PROMPTS.length];
   const activeLearner = learners[profileIndex];
   const inspectedLearnerId = hoveredLearnerId || selectedLearnerId;
   const inspectedLearner = learners.find((l) => l.id === inspectedLearnerId) || null;
   const selectedLearner = learners.find((l) => l.id === selectedLearnerId) || null;
+  const dialogueStudent =
+    learners.find((l) => l.id === (dialogue?.studentId || answeringStudentId || lastAnsweredId)) || null;
 
   useEffect(() => {
     soundEngine.enabled = soundEnabled;
   }, [soundEnabled]);
+
+  useEffect(() => {
+    return () => {
+      if (answerTimerRef.current) window.clearTimeout(answerTimerRef.current);
+      if (teacherTalkTimerRef.current) window.clearTimeout(teacherTalkTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -85,9 +123,17 @@ function App() {
 
   useEffect(() => {
     if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(''), 3200);
+    const timer = window.setTimeout(() => setNotice(''), 3400);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  const pulseTeacherTalking = useCallback((durationMs = 2600) => {
+    setTeacherTalking(true);
+    if (teacherTalkTimerRef.current) window.clearTimeout(teacherTalkTimerRef.current);
+    teacherTalkTimerRef.current = window.setTimeout(() => {
+      setTeacherTalking(false);
+    }, durationMs);
+  }, []);
 
   function speakCurrentScene() {
     if (!('speechSynthesis' in window)) {
@@ -95,10 +141,12 @@ function App() {
       return;
     }
     const copy = {
-      welcome: 'Welcome to the 3D Bloomly classroom. Twenty learners are seated on their chairs. Drag each learner from their chair to stand in one of four groups of five.',
+      welcome: 'Welcome to Estate Model High School 3D classroom. Twenty learners are seated facing the Civic Education chalkboard. Drag learners into four groups of five, answer teacher questions, write on the board, or click the windows to explore the play field outside.',
       learners: `${activeLearner.name}. Academic ability: ${activeLearner.ability}. Learning style: ${activeLearner.learningStyle}. Personality: ${activeLearner.personality}. Social skill: ${activeLearner.socialSkill}. Behaviour: ${activeLearner.behaviour}. ${activeLearner.note}`,
-      arrange: `3D Classroom Game. ${placedCount} of 20 learners are standing in groups, and ${seatedCount} remain seated on chairs. Drag any seated student onto a group mat to make them stand there.`,
-      results: 'Well done. All twenty learners are standing in four balanced groups of five.',
+      arrange: dialogue
+        ? `${dialogue.speaker}. ${dialogue.text} ${dialogue.reply || ''}`
+        : `Estate Model High School 3D Classroom. ${placedCount} of 20 learners are standing in groups, and ${seatedCount} remain seated facing the Civic Education board. Click any window to go outside to the play field.`,
+      results: `Well done. All twenty Estate Model High School learners are standing in four balanced groups of five with ${classPoints} class participation points.`,
     }[stage];
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(copy);
@@ -107,6 +155,151 @@ function App() {
     window.speechSynthesis.speak(utterance);
     setNotice('Reading scene aloud.');
   }
+
+  const handleWindowEscape = useCallback(() => {
+    setCameraPreset((curr) => {
+      if (curr === 'field' || curr === 'playground') {
+        setNotice('Flying back inside Estate Model High School classroom.');
+        return 'overview';
+      }
+      setNotice('Escaped through the window to the Estate Model High School play field & playground!');
+      return 'field';
+    });
+  }, []);
+
+  const startQuestionRound = useCallback(
+    (advancePrompt = false) => {
+      const nextIdx = advancePrompt ? (promptIndex + 1) % QUESTION_PROMPTS.length : promptIndex;
+      const nextPrompt = QUESTION_PROMPTS[nextIdx];
+      if (advancePrompt) {
+        setPromptIndex(nextIdx);
+      }
+      if (answerTimerRef.current) window.clearTimeout(answerTimerRef.current);
+      setQaActive(true);
+      setAnsweredInRound([]);
+      setAnsweringStudentId(null);
+      setLastAnsweredId(null);
+      setDialogue({
+        speaker: 'Teacher',
+        text: nextPrompt.question,
+        reply: 'Amaka, Zara Okafor, Bayo, Kene, Adaeze & Emeka stood up with hands raised! Click any raised hand to hear their answer—or drag them to a Group mat anytime.',
+        studentId: null,
+      });
+      pulseTeacherTalking(3000);
+      soundEngine.playTeacherPrompt();
+      window.setTimeout(() => soundEngine.playHandRaise(), 240);
+      setNotice('Amaka, Okafor & 4 classmates stood up! Click a raised hand or drag them to a group.');
+    },
+    [promptIndex, pulseTeacherTalking],
+  );
+
+  const handleAnswerStudent = useCallback(
+    (studentId) => {
+      const learner = learners.find((l) => l.id === studentId);
+      if (!learner) return;
+      const prompt = QUESTION_PROMPTS[promptIndex % QUESTION_PROMPTS.length];
+      const resp = prompt.responses[studentId] || {
+        answer: `${learner.name.split(' ')[0]}: Working together lets everyone share their best strengths!`,
+        boardText: `${learner.name.split(' ')[0]}: Teamwork counts!`,
+        teacherReply: `Teacher: Great thinking, ${learner.name.split(' ')[0]}!`,
+      };
+
+      if (answerTimerRef.current) window.clearTimeout(answerTimerRef.current);
+      setAnsweringStudentId(studentId);
+      setLastAnsweredId(studentId);
+      setSelectedLearnerId(studentId);
+      setAnsweredInRound((prev) => (prev.includes(studentId) ? prev : [...prev, studentId]));
+      setClassPoints((pts) => pts + 10);
+      setDialogue({
+        speaker: learner.name,
+        text: resp.answer,
+        reply: resp.teacherReply,
+        studentId,
+      });
+      pulseTeacherTalking(3200);
+      soundEngine.playTeacherPraise();
+      setNotice(`${learner.name} answered (+10 pts)! You can send them to the board or place them in a group.`);
+
+      answerTimerRef.current = window.setTimeout(() => {
+        setAnsweringStudentId((curr) => (curr === studentId ? null : curr));
+      }, 3600);
+    },
+    [promptIndex, pulseTeacherTalking],
+  );
+
+  const handleTeacherClick = useCallback(() => {
+    if (!qaActive) {
+      startQuestionRound(false);
+      return;
+    }
+    if (raisedHandIds.length > 0) {
+      handleAnswerStudent(raisedHandIds[0]);
+      return;
+    }
+    startQuestionRound(true);
+  }, [qaActive, raisedHandIds, startQuestionRound, handleAnswerStudent]);
+
+  const handleSendToBoard = useCallback(
+    (studentId) => {
+      const learner = learners.find((l) => l.id === studentId);
+      if (!learner) return;
+      if (boardTask) {
+        setNotice(`${boardTask.author} is currently writing at the board—just a moment!`);
+        return;
+      }
+      const prompt = QUESTION_PROMPTS[promptIndex % QUESTION_PROMPTS.length];
+      const customText =
+        prompt.responses[studentId]?.boardText ||
+        `${learner.name.split(' ')[0]}: ${learner.learningStyle} teamwork!`;
+
+      const nextKey = boardKeyRef.current++;
+      setBoardTask({
+        studentId,
+        author: learner.name.split(' ')[0],
+        text: customText,
+        key: nextKey,
+      });
+      setAnsweringStudentId(null);
+      setSelectedLearnerId(studentId);
+      setDialogue({
+        speaker: 'Teacher',
+        text: `Please come up to the chalkboard, ${learner.name.split(' ')[0]}, and write your idea for the class.`,
+        reply: `Writing: "${customText}"`,
+        studentId,
+      });
+      pulseTeacherTalking(3000);
+      soundEngine.playTeacherPrompt();
+      setNotice(`${learner.name} is walking to the chalkboard to write!`);
+    },
+    [boardTask, promptIndex, pulseTeacherTalking],
+  );
+
+  const handleBoardComplete = useCallback(
+    (studentId) => {
+      const learner = learners.find((l) => l.id === studentId);
+      const author = learner ? learner.name.split(' ')[0] : 'Learner';
+      setBoardTask((current) => {
+        if (!current || current.studentId !== studentId) return current;
+        setBoardHistory((prev) => {
+          const exists = prev.some((e) => e.author === current.author && e.text === current.text);
+          if (exists) return prev;
+          return [...prev, { author: current.author, text: current.text }].slice(-8);
+        });
+        return null;
+      });
+      setClassPoints((pts) => pts + 10);
+      setDialogue({
+        speaker: 'Teacher',
+        text: `Well written on the board, ${author}! Everyone can see your notes clearly now.`,
+        reply: `${author} returned to ${assignments[studentId] ? `Group ${assignments[studentId]}` : 'their seat'} (+10 pts).`,
+        studentId,
+      });
+      pulseTeacherTalking(2400);
+      soundEngine.playTeacherPraise();
+      setNotice(`${learner?.name || author} wrote on the chalkboard (+10 pts)!`);
+    },
+    [assignments, pulseTeacherTalking],
+  );
 
   const assignLearner = useCallback(
     (learnerId, groupId) => {
@@ -126,6 +319,7 @@ function App() {
       const nextAssignments = { ...assignments, [learnerId]: groupId };
       setAssignments(nextAssignments);
       setSelectedLearnerId(null);
+      setClassPoints((pts) => pts + 5);
 
       const learner = learners.find((item) => item.id === learnerId);
       const nextCount = currentMembers.length + 1;
@@ -161,7 +355,7 @@ function App() {
   function enterClassroom() {
     setStage('arrange');
     setCameraPreset('overview');
-    setNotice('Drag any seated student from their chair onto a Group mat to stand!');
+    startQuestionRound(false);
   }
 
   function handleReview() {
@@ -182,8 +376,17 @@ function App() {
 
   function resetSimulation() {
     soundEngine.playReturnToChair();
+    if (answerTimerRef.current) window.clearTimeout(answerTimerRef.current);
     setAssignments({});
     setSelectedLearnerId(null);
+    setQaActive(false);
+    setAnsweredInRound([]);
+    setAnsweringStudentId(null);
+    setLastAnsweredId(null);
+    setBoardTask(null);
+    setBoardHistory([]);
+    setDialogue(null);
+    setClassPoints(0);
     setNotice('All 20 learners are seated back on their chairs.');
   }
 
@@ -205,6 +408,10 @@ function App() {
     [assignments],
   );
 
+  const boardCandidateId =
+    selectedLearner?.id || answeringStudentId || lastAnsweredId || raisedHandIds[0] || 'learner-1';
+  const boardCandidate = learners.find((l) => l.id === boardCandidateId) || learners[0];
+
   return (
     <main className="app-shell-3d">
       {/* Dedicated Full-Viewport 3D Three.js Canvas */}
@@ -214,31 +421,43 @@ function App() {
         selectedLearnerId={selectedLearnerId}
         cameraPreset={cameraPreset}
         interactive={stage === 'arrange'}
+        raisedHandIds={stage === 'arrange' ? raisedHandIds : []}
+        answeringStudentId={stage === 'arrange' ? answeringStudentId : null}
+        teacherTalking={teacherTalking}
+        boardTask={boardTask}
+        boardHistory={boardHistory}
         onSelectLearner={setSelectedLearnerId}
         onHoverLearner={setHoveredLearnerId}
         onAssignLearner={assignLearner}
         onUnassignLearner={unassignLearner}
+        onSendToBoard={handleSendToBoard}
+        onBoardComplete={handleBoardComplete}
+        onAnswerStudent={handleAnswerStudent}
+        onTeacherClick={handleTeacherClick}
+        onWindowClick={handleWindowEscape}
       />
 
       {/* Stage 1: Welcome Overlay */}
       {stage === 'welcome' && (
-        <section className="overlay-center" aria-label="Welcome to Bloomly 3D">
+        <section className="overlay-center" aria-label="Welcome to Estate Model High School 3D">
           <div className="welcome-card-3d">
             <div className="welcome-brand">
               <span className="brand-flower">
                 <Icon name="sparkle" size={17} />
               </span>
-              <span>Bloomly 3D</span>
+              <span>Estate Model High School</span>
             </div>
-            <p className="eyebrow">3D CLASSROOM GAME</p>
-            <h1>Drag Seated Learners Into Groups</h1>
+            <p className="eyebrow">CIVIC EDUCATION · 3D CLASSROOM</p>
+            <h1>Voting, Teamwork &amp; Electoral Process</h1>
             <p className="welcome-copy">
-              All 20 students start seated on their chairs. Pick them up in 3D and drop them onto the 4 group mats to stand in teams of 5.
+              All 20 students sit facing the Civic Education chalkboard. Drag learners into 4 groups of 5, hear Amaka, Zara Okafor &amp; classmates answer questions, write on the board, or click the windows to explore the play field outside.
             </p>
             <div className="welcome-meta-line">
               <span>20 seated learners</span>
               <span aria-hidden="true">·</span>
-              <span>4 standing groups of 5</span>
+              <span>Civic Education Q&amp;A</span>
+              <span aria-hidden="true">·</span>
+              <span>Play field &amp; playground</span>
             </div>
             <div className="welcome-btn-row">
               <button className="primary-button" type="button" onClick={enterClassroom}>
@@ -399,7 +618,7 @@ function App() {
         </section>
       )}
 
-      {/* Stage 3: 3D Game HUD (Top minimal bar + Hover Inspector + Collapsible Bottom Dock) */}
+      {/* Stage 3: 3D Game HUD (Top minimal bar + Hover Inspector + Teacher Dialogue + Collapsible Dock) */}
       {stage === 'arrange' && (
         <>
           <header className="hud-top-bar">
@@ -407,13 +626,17 @@ function App() {
               <span className="brand-flower">
                 <Icon name="sparkle" size={15} />
               </span>
-              <span className="hud-brand-name">Bloomly</span>
+              <span className="hud-brand-name">Estate Model High</span>
             </div>
 
             <div className="hud-status-text">
-              <span>Seated on chairs: <strong>{seatedCount}</strong></span>
+              <span>Seated: <strong>{seatedCount}</strong></span>
               <span aria-hidden="true">·</span>
-              <span>Standing in groups: <strong>{placedCount} / 20</strong></span>
+              <span>Groups: <strong>{placedCount} / 20</strong></span>
+              <span aria-hidden="true">·</span>
+              <span>Board: <strong>{boardHistory.length}</strong></span>
+              <span aria-hidden="true">·</span>
+              <span>Points: <strong>{classPoints}</strong></span>
             </div>
 
             <div className="hud-actions-zone">
@@ -447,7 +670,7 @@ function App() {
             </div>
           </header>
 
-          {/* Compact Inspector Card (Appears only while hovering or selecting a 3D student) */}
+          {/* Compact Inspector Card (Appears while hovering or selecting a 3D student) */}
           {inspectedLearner && (
             <aside className="hud-inspector-card" aria-live="polite">
               <div className="inspector-head">
@@ -460,9 +683,11 @@ function App() {
                 <div>
                   <strong>{inspectedLearner.name}</strong>
                   <span>
-                    {assignments[inspectedLearner.id]
-                      ? `Standing in Group ${assignments[inspectedLearner.id]}`
-                      : 'Seated on chair · Drag to a group'}
+                    {raisedHandIds.includes(inspectedLearner.id)
+                      ? 'Hand raised · Click to answer or drag to group'
+                      : assignments[inspectedLearner.id]
+                        ? `Standing in Group ${assignments[inspectedLearner.id]}`
+                        : 'Seated on chair · Drag to group or board'}
                   </span>
                 </div>
               </div>
@@ -473,6 +698,125 @@ function App() {
                 <div><small>Personality</small><strong>{inspectedLearner.personality}</strong></div>
               </div>
               <p className="inspector-note">{inspectedLearner.note}</p>
+            </aside>
+          )}
+
+          {/* Teacher & Student Interaction Dialogue Card (Top-right corner, clear of center 3D view) */}
+          {dialogue && (
+            <aside className="hud-dialogue-card" aria-label="Teacher and student interaction">
+              <div className="dialogue-header">
+                <div className="dialogue-speaker-row">
+                  {dialogueStudent && dialogue.speaker !== 'Teacher' ? (
+                    <img
+                      className="dialogue-avatar"
+                      src={dialogueStudent.avatar}
+                      alt={dialogueStudent.name}
+                      draggable={false}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="dialogue-teacher-badge">
+                      <Icon name="graduation" size={15} />
+                    </span>
+                  )}
+                  <div>
+                    <p className="eyebrow">TEACHER · STUDENT INTERACTION</p>
+                    <strong>{dialogue.speaker}</strong>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="dialogue-close-btn"
+                  aria-label="Close dialogue"
+                  onClick={() => setDialogue(null)}
+                >
+                  <Icon name="close" size={14} />
+                </button>
+              </div>
+
+              <p className="dialogue-main-text">{dialogue.text}</p>
+              {dialogue.reply && <p className="dialogue-reply-text">{dialogue.reply}</p>}
+
+              {qaActive && (
+                <div className="dialogue-meta-row">
+                  <span>
+                    {raisedHandIds.length > 0
+                      ? `${raisedHandIds.length} hands raised (${raisedHandIds
+                          .map((id) => learners.find((l) => l.id === id)?.name.split(' ')[0])
+                          .join(', ')})`
+                      : `All 6 students answered "${activePrompt.question.slice(0, 34)}..."`}
+                  </span>
+                </div>
+              )}
+
+              <div className="dialogue-actions">
+                {qaActive && raisedHandIds.length > 0 && (
+                  <button
+                    type="button"
+                    className="quiet-button dialogue-btn"
+                    onClick={() => handleAnswerStudent(raisedHandIds[0])}
+                  >
+                    Call {learners.find((l) => l.id === raisedHandIds[0])?.name.split(' ')[0]}
+                  </button>
+                )}
+
+                {dialogue.studentId && (
+                  <button
+                    type="button"
+                    className="quiet-button dialogue-btn"
+                    disabled={Boolean(boardTask)}
+                    onClick={() => handleSendToBoard(dialogue.studentId)}
+                  >
+                    <Icon name="edit" size={13} />
+                    <span>Write on Board</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className="primary-button dialogue-btn"
+                  onClick={() => startQuestionRound(true)}
+                >
+                  Next Question
+                </button>
+              </div>
+            </aside>
+          )}
+
+          {/* Outdoor Field & Playground Banner (when viewer escaped out through the window) */}
+          {(cameraPreset === 'field' || cameraPreset === 'playground') && (
+            <aside className="hud-outdoor-card" aria-label="Outdoor play field controls">
+              <div>
+                <p className="eyebrow">OUTSIDE ESTATE MODEL HIGH SCHOOL</p>
+                <strong>
+                  {cameraPreset === 'field'
+                    ? 'School Sports Field & Vegetation'
+                    : 'Schoolyard Playground & Swings'}
+                </strong>
+              </div>
+              <div className="outdoor-btn-row">
+                <button
+                  type="button"
+                  className={`quiet-button dialogue-btn ${cameraPreset === 'field' ? 'dock-active-qa' : ''}`}
+                  onClick={() => setCameraPreset('field')}
+                >
+                  Sports Field
+                </button>
+                <button
+                  type="button"
+                  className={`quiet-button dialogue-btn ${cameraPreset === 'playground' ? 'dock-active-qa' : ''}`}
+                  onClick={() => setCameraPreset('playground')}
+                >
+                  Playground
+                </button>
+                <button
+                  type="button"
+                  className="primary-button dialogue-btn"
+                  onClick={() => setCameraPreset('overview')}
+                >
+                  Back Inside Class
+                </button>
+              </div>
             </aside>
           )}
 
@@ -522,16 +866,54 @@ function App() {
               <div className="dock-divider" aria-hidden="true" />
 
               <div className="dock-row-controls">
+                <button
+                  type="button"
+                  className={`quiet-button dock-small-btn ${qaActive ? 'dock-active-qa' : ''}`}
+                  onClick={() => startQuestionRound(qaActive && raisedHandIds.length === 0)}
+                  title="Have Teacher ask the class a question so Amaka, Zara Okafor & 4 classmates raise hands"
+                >
+                  <Icon name="message" size={14} />
+                  <span>Ask Class (Q&amp;A)</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="quiet-button dock-small-btn"
+                  disabled={Boolean(boardTask)}
+                  onClick={() => handleSendToBoard(boardCandidate.id)}
+                  title={`Send ${boardCandidate.name} to write on the chalkboard`}
+                >
+                  <Icon name="edit" size={14} />
+                  <span>Write: {boardCandidate.name.split(' ')[0]}</span>
+                </button>
+
                 <div className="dock-cam-group" role="group" aria-label="Camera views">
                   <span className="dock-cam-icon"><Icon name="camera" size={14} /></span>
-                  {(['overview', 'chairs', 'groups'] ).map((preset) => (
+                  {(['overview', 'board', 'chairs', 'groups', 'field', 'playground']).map((preset) => (
                     <button
                       key={preset}
                       type="button"
                       onClick={() => setCameraPreset(preset)}
                       className={`dock-cam-btn ${cameraPreset === preset ? 'active' : ''}`}
+                      title={
+                        preset === 'field'
+                          ? 'Escape through the window to visualize the play field outside'
+                          : preset === 'playground'
+                            ? 'Explore the playground outside the classroom window'
+                            : undefined
+                      }
                     >
-                      {preset === 'overview' ? 'Room' : preset === 'chairs' ? 'Chairs' : 'Groups'}
+                      {preset === 'overview'
+                        ? 'Room'
+                        : preset === 'board'
+                          ? 'Board'
+                          : preset === 'chairs'
+                            ? 'Chairs'
+                            : preset === 'groups'
+                              ? 'Groups'
+                              : preset === 'field'
+                                ? 'Field'
+                                : 'Play'}
                     </button>
                   ))}
                 </div>
@@ -560,7 +942,7 @@ function App() {
 
                 <button
                   type="button"
-                  className={`primary-button dock-review-btn ${isComplete ? 'ready-pulse' : ''}`}
+                  className="primary-button dock-review-btn"
                   onClick={handleReview}
                 >
                   <span>Review</span>
@@ -594,11 +976,12 @@ function App() {
                 <p className="eyebrow">CLASSROOM ARRANGEMENT</p>
                 <h2>Well done!</h2>
                 <p className="success-copy">
-                  All 20 learners stood up from their chairs and formed four balanced groups of five.
+                  All 20 learners stood up from their chairs and formed four balanced groups of five while sharing ideas with their teacher and writing on the board.
                 </p>
                 <div className="success-stats">
-                  <div><strong>20</strong><span>Learners standing</span></div>
-                  <div><strong>4 × 5</strong><span>Group structure</span></div>
+                  <div><strong>20</strong><span>Standing</span></div>
+                  <div><strong>4 × 5</strong><span>Groups</span></div>
+                  <div><strong>{classPoints}</strong><span>Points</span></div>
                 </div>
                 <div className="results-btn-stack">
                   <button
@@ -632,7 +1015,7 @@ function App() {
                 </div>
                 <div className="takeaway-item">
                   <span className="check-mark"><Icon name="check" size={14} /></span>
-                  <p>Be flexible. Observe how groups work and adjust when learners’ needs change.</p>
+                  <p>Invite learners to answer aloud and share ideas on the board to build confidence across groups.</p>
                 </div>
                 <div className="group-summary-list">
                   {groupInsights.map((group) => (

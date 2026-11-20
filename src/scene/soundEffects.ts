@@ -71,6 +71,28 @@ class SoundEngine {
     this.playTone(420, 0.14, 'sine', 0.05, 0, 280);
   }
 
+  playHandRaise() {
+    this.playTone(587.33, 0.14, 'sine', 0.06, 0);
+    this.playTone(880, 0.18, 'sine', 0.06, 0.07);
+  }
+
+  playTeacherPrompt() {
+    this.playTone(440, 0.18, 'triangle', 0.06, 0);
+    this.playTone(554.37, 0.22, 'triangle', 0.06, 0.09);
+  }
+
+  playTeacherPraise() {
+    this.playTone(659.25, 0.16, 'sine', 0.06, 0);
+    this.playTone(783.99, 0.16, 'sine', 0.06, 0.08);
+    this.playTone(1046.5, 0.26, 'triangle', 0.07, 0.16);
+  }
+
+  playChalkWrite() {
+    [0, 0.18, 0.36, 0.54].forEach((delay, idx) => {
+      this.playTone(900 + idx * 110, 0.07, 'triangle', 0.025, delay, 740);
+    });
+  }
+
   playError() {
     this.playTone(210, 0.14, 'triangle', 0.05, 0, 165);
   }

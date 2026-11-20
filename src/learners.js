@@ -47,3 +47,86 @@ export const groups = [
   { id: 3, name: 'Group 3', tone: 'pink' },
   { id: 4, name: 'Group 4', tone: 'lilac' },
 ];
+
+// Amaka, Zara Okafor, and 4 additional classmates who stand up to answer Civic Education questions
+export const QUESTION_PROMPTS = [
+  {
+    question: 'Why is voting by secret ballot important in our electoral process?',
+    responses: {
+      'learner-1': {
+        answer: 'Amaka: A secret ballot lets every citizen vote freely without fear or pressure from anyone.',
+        boardText: 'Amaka: Secret ballot = free choice',
+        teacherReply: 'Teacher: Spot on, Amaka! Protecting voter privacy keeps elections fair.',
+      },
+      'learner-3': {
+        answer: 'Zara Okafor: When votes are private and counted openly, people trust the election results.',
+        boardText: 'Okafor: Privacy builds civic trust',
+        teacherReply: 'Teacher: Thoughtful answer, Zara Okafor! Trust is the heart of democracy.',
+      },
+      'learner-2': {
+        answer: 'Bayo: Every eligible citizen gets one equal vote, no matter their background.',
+        boardText: 'Bayo: One citizen, one equal vote',
+        teacherReply: 'Teacher: Exactly right, Bayo! Equality at the ballot box is a key civic right.',
+      },
+      'learner-4': {
+        answer: 'Kene: At the polling unit, voters verify their PVC, mark their ballot, and drop it in the box.',
+        boardText: 'Kene: Verify PVC -> Mark -> Ballot Box',
+        teacherReply: 'Teacher: Great step-by-step recall, Kene!',
+      },
+      'learner-6': {
+        answer: 'Adaeze: Peaceful voting lets communities choose responsible leaders without conflict.',
+        boardText: 'Adaeze: Peaceful voting = strong leaders',
+        teacherReply: 'Teacher: Well said, Adaeze! Civic responsibility keeps our school and nation peaceful.',
+      },
+      'learner-9': {
+        answer: 'Emeka: Counting ballots transparently in front of agents stops cheating and errors.',
+        boardText: 'Emeka: Open counting = fair results',
+        teacherReply: 'Teacher: Sharp observation, Emeka! Transparency protects every single vote.',
+      },
+    },
+  },
+  {
+    question: 'What are the main stages of the electoral process from start to finish?',
+    responses: {
+      'learner-1': {
+        answer: 'Amaka: First comes voter registration, then peaceful campaigns where candidates share plans.',
+        boardText: 'Amaka: Register -> Campaign -> Vote',
+        teacherReply: 'Teacher: Excellent start, Amaka! Informed voters listen to ideas first.',
+      },
+      'learner-3': {
+        answer: 'Zara Okafor: Next is polling day, followed by counting ballots and announcing the winner.',
+        boardText: 'Okafor: Poll Day -> Count -> Declare',
+        teacherReply: 'Teacher: Clear and concise, Zara Okafor!',
+      },
+      'learner-2': {
+        answer: 'Bayo: Civic education teaches citizens how to vote properly so ballots are not voided.',
+        boardText: 'Bayo: Civic education stops void votes',
+        teacherReply: 'Teacher: Very true, Bayo! Knowing how to thumbprint neatly matters.',
+      },
+      'learner-4': {
+        answer: 'Kene: Electoral officers set up polling booths early and check the voter register.',
+        boardText: 'Kene: Check register at polling unit',
+        teacherReply: 'Teacher: Practical and accurate, Kene!',
+      },
+      'learner-6': {
+        answer: 'Adaeze: Citizens must obey electoral laws and respect the final result peacefully.',
+        boardText: 'Adaeze: Respect law & election results',
+        teacherReply: 'Teacher: True civic maturity, Adaeze!',
+      },
+      'learner-9': {
+        answer: 'Emeka: Even here at Estate Model High School, we can practise fair elections for prefects!',
+        boardText: 'Emeka: Fair prefect elections at school',
+        teacherReply: 'Teacher: What a great connection to Estate Model High School, Emeka!',
+      },
+    },
+  },
+];
+
+export const QUESTION_RESPONDENT_IDS = [
+  'learner-1', // Amaka Uche
+  'learner-3', // Zara Okafor
+  'learner-2', // Bayo Adeyemi
+  'learner-4', // Kene Mensah
+  'learner-6', // Adaeze Obi
+  'learner-9', // Emeka Eze
+];
