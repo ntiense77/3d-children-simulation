@@ -1036,7 +1036,7 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 22px;
+  padding: 20px;
   border: 1px solid var(--line);
   border-radius: 22px;
   background: #ffffff;
@@ -1045,12 +1045,47 @@ button:focus-visible {
 .success-star {
   display: grid;
   place-items: center;
-  width: 58px;
-  height: 58px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   color: white;
   background: linear-gradient(140deg, #be8afb, #7539c5);
-  margin-bottom: 14px;
+  margin-bottom: 10px;
+}
+
+.score-rank-pill {
+  display: inline-block;
+  padding: 4px 11px;
+  border-radius: 8px;
+  background: #f3e8ff;
+  color: #5e2ba8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  margin-bottom: 8px;
+}
+
+.score-total-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.score-total-hero strong {
+  font: 800 38px / 1 Manrope, sans-serif;
+  letter-spacing: -1.4px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.score-total-hero span {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8b73a8;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-top: 4px;
 }
 
 .success-card h2 {
@@ -1062,16 +1097,16 @@ button:focus-visible {
 .success-copy {
   color: var(--ink-soft);
   font-size: 12px;
-  line-height: 1.55;
-  margin: 0 0 16px;
+  line-height: 1.5;
+  margin: 0 0 14px;
 }
 
 .success-stats {
   display: flex;
   justify-content: center;
-  gap: 24px;
-  padding: 12px 8px;
-  margin-bottom: 16px;
+  gap: 18px;
+  padding: 10px 6px;
+  margin-bottom: 14px;
   width: 100%;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -1079,8 +1114,9 @@ button:focus-visible {
 
 .success-stats strong {
   display: block;
-  font: 800 18px Manrope, sans-serif;
+  font: 800 17px Manrope, sans-serif;
   color: #6733a6;
+  font-variant-numeric: tabular-nums;
 }
 
 .success-stats span {
@@ -1099,16 +1135,17 @@ button:focus-visible {
   border: 1px solid var(--line);
   border-radius: 22px;
   background: #ffffff;
-  padding: 20px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .takeaways-title {
   display: flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .takeaway-bulb {
@@ -1124,6 +1161,58 @@ button:focus-visible {
 .takeaways-title h2 {
   margin: 0;
   font: 800 16px Manrope, sans-serif;
+}
+
+.score-breakdown-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.score-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fcf9ff;
+}
+
+.score-row strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.score-row small {
+  display: block;
+  font-size: 10px;
+  color: #7c6696;
+  margin-top: 2px;
+}
+
+.score-pts {
+  font: 800 13px Manrope, sans-serif;
+  color: #6733a6;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-takeaway-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.score-takeaway-note p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-soft);
 }
 
 .takeaway-item {
@@ -1153,9 +1242,9 @@ button:focus-visible {
 
 .group-summary-list {
   display: grid;
-  gap: 7px;
+  gap: 6px;
   margin-top: auto;
-  padding-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
 }
 

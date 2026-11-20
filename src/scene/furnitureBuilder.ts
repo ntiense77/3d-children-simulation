@@ -30,6 +30,27 @@ export interface BoardZone {
 export interface WindowZone {
   id: string;
   center: THREE.Vector3;
+  insidePos: THREE.Vector3;
+  sillPos: THREE.Vector3;
+  outsidePos: THREE.Vector3;
+  hitMesh: THREE.Mesh;
+  frameMat: THREE.MeshStandardMaterial;
+}
+
+export interface SwingSeatSlot {
+  seatIndex: 0 | 1;
+  pivotGroup: THREE.Group;
+  riderAnchor: THREE.Object3D;
+  approachPos: THREE.Vector3;
+  swingYaw: number;
+  phaseOffset: number;
+}
+
+export interface DoorZone {
+  center: THREE.Vector3;
+  outsidePos: THREE.Vector3;
+  insidePos: THREE.Vector3;
+  doorPivot: THREE.Group;
   hitMesh: THREE.Mesh;
   frameMat: THREE.MeshStandardMaterial;
 }
@@ -133,6 +154,33 @@ function createBoardSpotLabelTexture(renderer: THREE.WebGLRenderer): THREE.Canva
   return tex;
 }
 
+function createDoorSignTexture(renderer: THREE.WebGLRenderer): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#4c1d95';
+  ctx.beginPath();
+  ctx.roundRect(8, 8, 496, 112, 22);
+  ctx.fill();
+
+  ctx.strokeStyle = '#f4c653';
+  ctx.lineWidth = 6;
+  ctx.stroke();
+
+  ctx.fillStyle = '#fffaf6';
+  ctx.font = '800 40px Manrope, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('CLASSROOM DOOR', 256, 65);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
 function createSchoolCarpetTexture(renderer: THREE.WebGLRenderer): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 1400;
@@ -225,7 +273,14 @@ function createFieldLinesTexture(renderer: THREE.WebGLRenderer): THREE.CanvasTex
   return tex;
 }
 
-function buildOutdoorSchoolyard(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
+function buildOutdoorSchoolyard(
+  scene: THREE.Scene,
+  renderer: THREE.WebGLRenderer,
+): {
+  ball: THREE.Mesh;
+  swingSeats: SwingSeatSlot[];
+  swingHitMesh: THREE.Mesh;
+} {
   // Grass lawn outside the classroom windows (x: -39 to -10.5)
   const lawnMat = new THREE.MeshStandardMaterial({
     color: 0x62a84f,
@@ -293,13 +348,23 @@ function buildOutdoorSchoolyard(scene: THREE.Scene, renderer: THREE.WebGLRendere
     scene.add(goalGroup);
   });
 
-  // Soccer ball on center spot
+  // Soccer ball on center spot (with contrasting seam ring so spin is visible!)
   const ball = new THREE.Mesh(
-    new THREE.SphereGeometry(0.18, 14, 14),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45 }),
+    new THREE.SphereGeometry(0.19, 16, 16),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.42 }),
   );
-  ball.position.set(-24.8, 0.18, -2.2);
+  ball.position.set(-24.8, 0.19, -2.2);
   ball.castShadow = true;
+  const ballStripe = new THREE.Mesh(
+    new THREE.TorusGeometry(0.185, 0.018, 8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55 }),
+  );
+  const ballStripe2 = new THREE.Mesh(
+    new THREE.TorusGeometry(0.185, 0.018, 8, 18),
+    new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55 }),
+  );
+  ballStripe2.rotation.y = Math.PI / 2;
+  ball.add(ballStripe, ballStripe2);
   scene.add(ball);
 
   // Playground Zone (closer to the front-left outside the windows: x ≈ -15.8, z ≈ +4.6)
@@ -311,9 +376,10 @@ function buildOutdoorSchoolyard(scene: THREE.Scene, renderer: THREE.WebGLRendere
   playgroundPad.receiveShadow = true;
   scene.add(playgroundPad);
 
-  // Swingset
+  // Swingset with animated hinged seats & rider anchors
   const swingFrameMat = new THREE.MeshStandardMaterial({ color: 0x6b32c2, roughness: 0.45, metalness: 0.25 });
   const swingSeatMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.55 });
+  const chainMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.6, roughness: 0.3 });
   const swingGroup = new THREE.Group();
   swingGroup.position.set(-16.2, 0, 5.4);
   swingGroup.rotation.y = 0.25;
@@ -334,19 +400,54 @@ function buildOutdoorSchoolyard(scene: THREE.Scene, renderer: THREE.WebGLRendere
     });
   });
 
-  [-0.58, 0.58].forEach((sx) => {
-    const chainMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.6, roughness: 0.3 });
+  const swingSeats: SwingSeatSlot[] = [];
+  [-0.58, 0.58].forEach((sx, idx) => {
+    const pivotGroup = new THREE.Group();
+    pivotGroup.position.set(sx, 2.25, 0);
+
     [-0.18, 0.18].forEach((cx) => {
-      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.65, 6), chainMat);
-      chain.position.set(sx + cx, 1.4, 0);
-      swingGroup.add(chain);
+      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.69, 6), chainMat);
+      chain.position.set(cx, -0.845, 0);
+      pivotGroup.add(chain);
     });
+
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.05, 0.24), swingSeatMat);
-    seat.position.set(sx, 0.56, 0);
+    seat.position.set(0, -1.69, 0);
     seat.castShadow = true;
-    swingGroup.add(seat);
+    pivotGroup.add(seat);
+
+    const riderAnchor = new THREE.Object3D();
+    riderAnchor.position.set(0, -1.995, 0);
+    pivotGroup.add(riderAnchor);
+
+    swingGroup.add(pivotGroup);
+
+    const seatIdx = idx as 0 | 1;
+    swingSeats.push({
+      seatIndex: seatIdx,
+      pivotGroup,
+      riderAnchor,
+      approachPos: new THREE.Vector3(),
+      swingYaw: swingGroup.rotation.y,
+      phaseOffset: idx * 2.1,
+    });
   });
+
+  const swingHitMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(3.1, 2.35, 1.6),
+    new THREE.MeshBasicMaterial({ visible: false }),
+  );
+  swingHitMesh.position.set(0, 1.18, 0);
+  swingHitMesh.userData.isSwing = true;
+  swingGroup.add(swingHitMesh);
+
   scene.add(swingGroup);
+  swingGroup.updateMatrixWorld(true);
+  swingSeats.forEach((slot, idx) => {
+    const sx = idx === 0 ? -0.58 : 0.58;
+    slot.approachPos.set(sx, 0, 0.72);
+    swingGroup.localToWorld(slot.approachPos);
+  });
 
   // Slide
   const slideGroup = new THREE.Group();
@@ -486,6 +587,8 @@ function buildOutdoorSchoolyard(scene: THREE.Scene, renderer: THREE.WebGLRendere
     rail.position.set(-34.2, ry, 0);
     scene.add(rail);
   });
+
+  return { ball, swingSeats, swingHitMesh };
 }
 
 export function buildClassroomEnvironment(
@@ -497,6 +600,10 @@ export function buildClassroomEnvironment(
   groupZones: GroupPadZone[];
   boardZone: BoardZone;
   windowZones: WindowZone[];
+  doorZone: DoorZone;
+  soccerBall: THREE.Mesh;
+  swingSeats: SwingSeatSlot[];
+  swingHitMesh: THREE.Mesh;
 } {
   // Classroom Interior Wood Floor (x: -10.5 to +11.5)
   const floorTex = createWoodPlankTexture(renderer);
@@ -512,7 +619,7 @@ export function buildClassroomEnvironment(
   scene.add(floor);
 
   // Build lush outdoor vegetation, football field & playground outside left windows
-  buildOutdoorSchoolyard(scene, renderer);
+  const { ball: soccerBall, swingSeats, swingHitMesh } = buildOutdoorSchoolyard(scene, renderer);
 
   // Classroom walls (back wall + left wall with REAL open window cutouts)
   const wallMat = new THREE.MeshStandardMaterial({
@@ -554,12 +661,16 @@ export function buildClassroomEnvironment(
     scene.add(outer);
   };
 
-  // Bottom apron (y: 0..1.75), top header (y: 4.45..6.2), and 3 vertical piers around the 2 windows
-  addLeftWallSegment(0.875, 1.75, 0, 20);
+  // Bottom apron under windows (z: -10..+3.8 & +5.4..+10), top header (y: 4.45..6.2),
+  // lintel above doorway (z: +3.8..+5.4, y: 2.6..4.45), and 4 vertical piers around 2 windows + door
+  addLeftWallSegment(0.875, 1.75, -3.1, 13.8);
+  addLeftWallSegment(0.875, 1.75, 7.7, 4.6);
   addLeftWallSegment(5.325, 1.75, 0, 20);
+  addLeftWallSegment(3.525, 1.85, 4.6, 1.6);
   addLeftWallSegment(3.1, 2.7, -6.925, 6.15);
   addLeftWallSegment(3.1, 2.7, -0.7, 1.3);
-  addLeftWallSegment(3.1, 2.7, 6.225, 7.55);
+  addLeftWallSegment(3.1, 2.7, 3.125, 1.35);
+  addLeftWallSegment(3.1, 2.7, 7.7, 4.6);
 
   // Exterior school trim strip along roof edge
   const roofTrim = new THREE.Mesh(
@@ -631,10 +742,108 @@ export function buildClassroomEnvironment(
     windowZones.push({
       id: `window-${idx + 1}`,
       center: new THREE.Vector3(-10.5, 3.05, zPos),
+      insidePos: new THREE.Vector3(-9.35, 0, zPos),
+      sillPos: new THREE.Vector3(-10.5, 1.85, zPos),
+      outsidePos: new THREE.Vector3(-11.85, 0, zPos),
       hitMesh: winHitMesh,
       frameMat,
     });
   });
+
+  // Walkable Classroom Door Portal on Left Wall (z = +4.6, width 1.6m, height 2.6m)
+  const doorZ = 4.6;
+  const doorFrameMat = new THREE.MeshStandardMaterial({
+    color: 0x8b522a,
+    roughness: 0.58,
+    metalness: 0.05,
+  });
+  const doorLeafMat = new THREE.MeshStandardMaterial({
+    color: 0xa46234,
+    roughness: 0.54,
+    metalness: 0.04,
+  });
+  const doorPanelAccentMat = new THREE.MeshStandardMaterial({
+    color: 0x7c4520,
+    roughness: 0.62,
+  });
+  const brassMat = new THREE.MeshStandardMaterial({
+    color: 0xf4c653,
+    roughness: 0.28,
+    metalness: 0.78,
+  });
+
+  const doorBackPost = new THREE.Mesh(new THREE.BoxGeometry(0.4, 2.66, 0.14), doorFrameMat);
+  doorBackPost.position.set(-10.52, 1.33, doorZ - 0.84);
+  doorBackPost.castShadow = true;
+  const doorFrontPost = new THREE.Mesh(new THREE.BoxGeometry(0.4, 2.66, 0.14), doorFrameMat);
+  doorFrontPost.position.set(-10.52, 1.33, doorZ + 0.84);
+  doorFrontPost.castShadow = true;
+  const doorHeader = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.14, 1.82), doorFrameMat);
+  doorHeader.position.set(-10.52, 2.66, doorZ);
+  doorHeader.castShadow = true;
+  const doorThreshold = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.024, 1.62), brassMat);
+  doorThreshold.position.set(-10.52, 0.012, doorZ);
+  scene.add(doorBackPost, doorFrontPost, doorHeader, doorThreshold);
+
+  const doorMatRug = new THREE.Mesh(
+    new THREE.BoxGeometry(1.15, 0.022, 1.42),
+    new THREE.MeshStandardMaterial({ color: 0x6b32c2, roughness: 0.92 }),
+  );
+  doorMatRug.position.set(-10.15, 0.011, doorZ);
+  doorMatRug.receiveShadow = true;
+  scene.add(doorMatRug);
+
+  // Overhead Door Sign on both interior and exterior wall faces
+  const doorSignTex = createDoorSignTexture(renderer);
+  const doorSignMat = new THREE.MeshBasicMaterial({ map: doorSignTex });
+  const doorSignIn = new THREE.Mesh(new THREE.PlaneGeometry(1.48, 0.37), doorSignMat);
+  doorSignIn.position.set(-10.35, 3.0, doorZ);
+  doorSignIn.rotation.y = Math.PI / 2;
+  const doorSignOut = new THREE.Mesh(new THREE.PlaneGeometry(1.48, 0.37), doorSignMat);
+  doorSignOut.position.set(-10.7, 3.0, doorZ);
+  doorSignOut.rotation.y = -Math.PI / 2;
+  scene.add(doorSignIn, doorSignOut);
+
+  // Hinged Wooden Door Leaf (swings inward +X cleanly along back jamb)
+  const doorPivot = new THREE.Group();
+  doorPivot.position.set(-10.42, 0, doorZ - 0.76);
+  doorPivot.rotation.y = 0.28;
+
+  const doorLeaf = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.54, 1.52), doorLeafMat);
+  doorLeaf.position.set(0, 1.27, 0.76);
+  doorLeaf.castShadow = true;
+  doorLeaf.receiveShadow = true;
+  doorPivot.add(doorLeaf);
+
+  const lowerTrim = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.85, 1.12), doorPanelAccentMat);
+  lowerTrim.position.set(0, 0.62, 0.76);
+  const upperWindowFrame = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.78, 0.92), doorPanelAccentMat);
+  upperWindowFrame.position.set(0, 1.85, 0.76);
+  const upperWindowGlass = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.64, 0.78), glassMat);
+  upperWindowGlass.position.set(0, 1.85, 0.76);
+  const handleIn = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.16), brassMat);
+  handleIn.position.set(0.07, 1.1, 1.32);
+  const handleOut = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.16), brassMat);
+  handleOut.position.set(-0.07, 1.1, 1.32);
+  doorPivot.add(lowerTrim, upperWindowFrame, upperWindowGlass, handleIn, handleOut);
+  scene.add(doorPivot);
+
+  const doorHitMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(0.95, 2.8, 1.75),
+    new THREE.MeshBasicMaterial({ visible: false }),
+  );
+  doorHitMesh.position.set(-10.5, 1.4, doorZ);
+  doorHitMesh.userData.isDoor = true;
+  scene.add(doorHitMesh);
+
+  const doorZone: DoorZone = {
+    center: new THREE.Vector3(-10.5, 1.3, doorZ),
+    outsidePos: new THREE.Vector3(-12.0, 0, doorZ),
+    insidePos: new THREE.Vector3(-8.75, 0, doorZ),
+    doorPivot,
+    hitMesh: doorHitMesh,
+    frameMat: doorFrameMat,
+  };
 
   // Civic Education, Voting & Electoral Process Chalkboard (Facing the children!)
   const boardPos = new THREE.Vector3(-1.85, 0, -5.65);
@@ -667,19 +876,24 @@ export function buildClassroomEnvironment(
   boardTex.colorSpace = THREE.SRGBColorSpace;
   boardTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  let lastBoardSignature = '';
+  let lastBoardSignature = '__uninitialized__';
+  let lastEntries: Array<{ author: string; text: string; progress: number }> = [];
   const drawBoard = (entries: Array<{ author: string; text: string; progress: number }>) => {
-    const sig = entries
-      .map((e) => `${e.author}:${e.text}:${Math.floor(e.progress * 30)}`)
-      .join('|');
+    lastEntries = entries;
+    const sig =
+      entries.length === 0
+        ? '__empty__'
+        : entries
+            .map((e) => `${e.author}:${e.text}:${Math.floor(e.progress * 30)}`)
+            .join('|');
     if (sig === lastBoardSignature) return;
     lastBoardSignature = sig;
 
-    boardCtx.fillStyle = '#1f4536';
+    boardCtx.fillStyle = '#1d4435';
     boardCtx.fillRect(0, 0, 1152, 460);
 
     // Subtle chalk smudge
-    boardCtx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    boardCtx.fillStyle = 'rgba(255, 255, 255, 0.035)';
     for (let i = 0; i < 40; i++) {
       boardCtx.fillRect((i * 89) % 1040, (i * 51) % 390, 120, 22);
     }
@@ -690,7 +904,7 @@ export function buildClassroomEnvironment(
     boardCtx.textAlign = 'center';
     boardCtx.fillText('CIVIC EDUCATION · Voting & Electoral Process', 576, 52);
 
-    boardCtx.strokeStyle = 'rgba(255, 240, 215, 0.35)';
+    boardCtx.strokeStyle = 'rgba(255, 240, 215, 0.42)';
     boardCtx.lineWidth = 3;
     boardCtx.beginPath();
     boardCtx.moveTo(80, 78);
@@ -709,7 +923,7 @@ export function buildClassroomEnvironment(
     boardCtx.fillStyle = '#fde68a';
     boardCtx.fillText('3. Electoral Process: Register → Campaign → Polling Unit → Count → Result', 84, 202);
 
-    boardCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    boardCtx.strokeStyle = 'rgba(255, 255, 255, 0.24)';
     boardCtx.lineWidth = 2;
     boardCtx.beginPath();
     boardCtx.moveTo(84, 228);
@@ -717,11 +931,16 @@ export function buildClassroomEnvironment(
     boardCtx.stroke();
 
     if (entries.length === 0) {
-      boardCtx.fillStyle = 'rgba(227, 214, 255, 0.88)';
-      boardCtx.font = '500 24px DM Sans, sans-serif';
-      boardCtx.fillText('Student Chalk Notes (drag a learner to Board mat or press Write):', 84, 272);
-      boardCtx.fillStyle = 'rgba(255, 249, 238, 0.72)';
-      boardCtx.fillText('✎ Waiting for learners to share their Civic Education notes...', 84, 322);
+      boardCtx.fillStyle = '#d1fae5';
+      boardCtx.font = '700 24px DM Sans, sans-serif';
+      boardCtx.fillText('4. Secret Ballot: Vote freely without fear, pressure, or bribery', 84, 272);
+
+      boardCtx.fillStyle = '#fff9ee';
+      boardCtx.fillText('5. Fair Counting: Transparent tallying builds trust in election results', 84, 316);
+
+      boardCtx.fillStyle = '#fde68a';
+      boardCtx.font = '600 22px DM Sans, sans-serif';
+      boardCtx.fillText('✎ Student Board Notes: Drag a learner to the Board mat or press Write!', 84, 384);
     } else {
       const visible = entries.slice(-3);
       visible.forEach((entry, idx) => {
@@ -744,10 +963,22 @@ export function buildClassroomEnvironment(
   };
 
   drawBoard([]);
+  if (typeof document !== 'undefined' && document.fonts?.ready) {
+    document.fonts.ready.then(() => {
+      lastBoardSignature = '__fonts_ready__';
+      drawBoard(lastEntries);
+    });
+  }
 
   const boardSurface = new THREE.Mesh(
     new THREE.PlaneGeometry(6.8, 2.45),
-    new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.82 }),
+    new THREE.MeshStandardMaterial({
+      map: boardTex,
+      roughness: 0.78,
+      emissiveMap: boardTex,
+      emissive: new THREE.Color(0xffffff),
+      emissiveIntensity: 0.18,
+    }),
   );
   boardSurface.position.set(0, 2.6, 0.09);
   boardGroup.add(boardSurface);
@@ -1004,5 +1235,9 @@ export function buildClassroomEnvironment(
       drawBoard,
     },
     windowZones,
+    doorZone,
+    soccerBall,
+    swingSeats,
+    swingHitMesh,
   };
 }

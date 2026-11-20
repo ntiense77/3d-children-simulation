@@ -93,6 +93,15 @@ class SoundEngine {
     });
   }
 
+  playBallKick() {
+    this.playTone(155, 0.11, 'triangle', 0.08, 0, 72);
+  }
+
+  playWhistle() {
+    this.playTone(1950, 0.12, 'sine', 0.045, 0, 2120);
+    this.playTone(2080, 0.16, 'sine', 0.045, 0.14, 1880);
+  }
+
   playError() {
     this.playTone(210, 0.14, 'triangle', 0.05, 0, 165);
   }

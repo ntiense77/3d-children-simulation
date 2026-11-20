@@ -9,6 +9,8 @@ import { ClassroomStage } from './scene/ClassroomStage';
 import { soundEngine } from './scene/soundEffects';
 
 const asset = (name) => `/assets/${name}`;
+const DEFAULT_SWING_IDS = ['learner-15', 'learner-18'];
+const DEFAULT_FIELD_IDS = ['learner-11', 'learner-14', 'learner-17', 'learner-20'];
 
 function Icon({ name, size = 20 }) {
   const paths = {
@@ -68,14 +70,32 @@ function App() {
   const [dialogue, setDialogue] = useState(null);
   const [boardTask, setBoardTask] = useState(null);
   const [boardHistory, setBoardHistory] = useState([]);
-  const [classPoints, setClassPoints] = useState(0);
+  const [qaAnswersCount, setQaAnswersCount] = useState(0);
+  const [goalsScored, setGoalsScored] = useState(0);
+  const [lastGoalScorer, setLastGoalScorer] = useState(null);
+  const [footballRecallsCount, setFootballRecallsCount] = useState(0);
+  const [fieldStudentIds, setFieldStudentIds] = useState(DEFAULT_FIELD_IDS);
+  const [swingStudentIds, setSwingStudentIds] = useState(DEFAULT_SWING_IDS);
+  const [recallingFromField, setRecallingFromField] = useState(false);
+  const [teacherPursuitActive, setTeacherPursuitActive] = useState(false);
 
   const boardKeyRef = useRef(1);
   const answerTimerRef = useRef(null);
   const teacherTalkTimerRef = useRef(null);
+  const fieldIdsRef = useRef(fieldStudentIds);
+  const swingIdsRef = useRef(swingStudentIds);
+  fieldIdsRef.current = fieldStudentIds;
+  swingIdsRef.current = swingStudentIds;
 
   const placedCount = Object.keys(assignments).length;
-  const seatedCount = learners.length - placedCount;
+  const outsideSet = useMemo(
+    () => new Set([...fieldStudentIds, ...swingStudentIds]),
+    [fieldStudentIds, swingStudentIds],
+  );
+  const outsideCount = outsideSet.size;
+  const seatedCount = learners.filter(
+    (learner) => !assignments[learner.id] && !outsideSet.has(learner.id),
+  ).length;
   const membersFor = useCallback(
     (groupId) => learners.filter((learner) => assignments[learner.id] === groupId),
     [assignments],
@@ -86,6 +106,41 @@ function App() {
     () => (qaActive ? QUESTION_RESPONDENT_IDS.filter((id) => !answeredInRound.includes(id)) : []),
     [qaActive, answeredInRound],
   );
+
+  const qaScore = qaAnswersCount * 10;
+  const boardScore = boardHistory.length * 10;
+  const footballScore = goalsScored * 15 + footballRecallsCount * 15;
+  const groupScore = placedCount * 5 + (isComplete ? 25 : 0);
+  const totalScore = qaScore + boardScore + footballScore + groupScore;
+
+  const scoreRank = useMemo(() => {
+    if (totalScore >= 160) {
+      return {
+        grade: 'S',
+        label: 'Star Citizen',
+        summary: 'Outstanding Civic Education leadership, chalkboard notes, group balance, and sportsmanship on the field!',
+      };
+    }
+    if (totalScore >= 100) {
+      return {
+        grade: 'A',
+        label: 'Civic Leader',
+        summary: 'Great classroom participation, active board writing, and prompt team spirit from the football pitch!',
+      };
+    }
+    if (totalScore >= 45) {
+      return {
+        grade: 'B',
+        label: 'Active Learner',
+        summary: 'Strong engagement across Civic Education and the Estate Model High School sports field.',
+      };
+    }
+    return {
+      grade: 'C',
+      label: 'Session Complete',
+      summary: 'You explored Estate Model High School! Answer class Q&A, write on the board, group learners, or score a goal to raise your score.',
+    };
+  }, [totalScore]);
 
   const activePrompt = QUESTION_PROMPTS[promptIndex % QUESTION_PROMPTS.length];
   const activeLearner = learners[profileIndex];
@@ -146,7 +201,7 @@ function App() {
       arrange: dialogue
         ? `${dialogue.speaker}. ${dialogue.text} ${dialogue.reply || ''}`
         : `Estate Model High School 3D Classroom. ${placedCount} of 20 learners are standing in groups, and ${seatedCount} remain seated facing the Civic Education board. Click any window to go outside to the play field.`,
-      results: `Well done. All twenty Estate Model High School learners are standing in four balanced groups of five with ${classPoints} class participation points.`,
+      results: `Estate Model High School Score Page. Total score: ${totalScore} points, Rank ${scoreRank.grade} ${scoreRank.label}. Civic Education answers: ${qaAnswersCount}. Chalkboard notes: ${boardHistory.length}. Football goals: ${goalsScored}. Learners grouped: ${placedCount} of 20.`,
     }[stage];
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(copy);
@@ -165,6 +220,155 @@ function App() {
       setNotice('Escaped through the window to the Estate Model High School play field & playground!');
       return 'field';
     });
+  }, []);
+
+  const handleRecallAllFromField = useCallback(() => {
+    setTeacherPursuitActive(true);
+    setRecallingFromField(true);
+    soundEngine.playWhistle();
+    setDialogue({
+      speaker: 'Teacher',
+      text: 'Whistle! Off the swings and football pitch—everyone come inside through the classroom door right now!',
+      reply: 'Teacher and all outdoor learners are walking in through the classroom door ready for Groups 1–4.',
+      studentId: null,
+    });
+    pulseTeacherTalking(3400);
+    setNotice('Teacher & students are coming in through the classroom door to join groups!');
+  }, [pulseTeacherTalking]);
+
+  const handleDoorClick = useCallback(() => {
+    if (fieldIdsRef.current.length > 0 || swingIdsRef.current.length > 0) {
+      handleRecallAllFromField();
+      setCameraPreset((curr) => (curr === 'field' || curr === 'playground' ? 'overview' : curr));
+      return;
+    }
+    setCameraPreset('overview');
+    setNotice('Classroom door ready—drag learners onto Group 1–4 mats or click Ask Class!');
+  }, [handleRecallAllFromField]);
+
+  const handleSendToField = useCallback(
+    (studentId) => {
+      const learner = learners.find((l) => l.id === studentId);
+      if (!learner) return;
+      setRecallingFromField(false);
+      setTeacherPursuitActive(true);
+      setSelectedLearnerId(null);
+      setSwingStudentIds((prev) => prev.filter((id) => id !== studentId));
+      setFieldStudentIds((prev) => (prev.includes(studentId) ? prev : [...prev, studentId]));
+      setDialogue({
+        speaker: 'Teacher',
+        text: `${learner.name.split(' ')[0]} slipped out the window onto the football pitch! I am going right after them!`,
+        reply: 'Watch the Teacher hop out the window to pursue them back to Civic Education class.',
+        studentId,
+      });
+      pulseTeacherTalking(3000);
+      soundEngine.playWhistle();
+      setNotice(`${learner.name} hopped out the window to play football! Teacher is pursuing!`);
+    },
+    [pulseTeacherTalking],
+  );
+
+  const handleSendToSwing = useCallback(
+    (studentId) => {
+      const learner = learners.find((l) => l.id === studentId);
+      if (!learner) return;
+      if (swingIdsRef.current.length >= 2 && !swingIdsRef.current.includes(studentId)) {
+        soundEngine.playError();
+        setNotice('Both swing seats are occupied—click a swinging learner to make room!');
+        return;
+      }
+      setRecallingFromField(false);
+      setSelectedLearnerId(null);
+      setFieldStudentIds((prev) => prev.filter((id) => id !== studentId));
+      setSwingStudentIds((prev) => (prev.includes(studentId) ? prev : [...prev, studentId]));
+      setCameraPreset('playground');
+      soundEngine.playPickup();
+      setNotice(`${learner.name} ran out to play on the swings!`);
+    },
+    [],
+  );
+
+  const handleSwingClick = useCallback(() => {
+    if (swingIdsRef.current.length === 0) {
+      setSwingStudentIds(DEFAULT_SWING_IDS);
+      setFieldStudentIds((prev) => prev.filter((id) => !DEFAULT_SWING_IDS.includes(id)));
+      setNotice('Chinonso & Zainab headed out to play on the playground swings!');
+    } else {
+      setNotice('Viewing learners playing on the playground swings!');
+    }
+    setCameraPreset('playground');
+  }, []);
+
+  const handleStartFieldFootball = useCallback(() => {
+    const squad = ['learner-4', 'learner-2', 'learner-9', 'learner-1', 'learner-3', 'learner-6'];
+    setRecallingFromField(false);
+    setTeacherPursuitActive(true);
+    setSelectedLearnerId(null);
+    setSwingStudentIds((prev) => prev.filter((id) => !squad.includes(id)));
+    setFieldStudentIds((prev) => Array.from(new Set([...prev, ...squad])));
+    setCameraPreset('field');
+    setDialogue({
+      speaker: 'Teacher',
+      text: 'Class! Kene, Bayo, Emeka, Amaka, Okafor & Adaeze jumped out the window to play football! Back to class!',
+      reply: 'Teacher is chasing them across the pitch with her cane—click "Recall Class" or click the Teacher!',
+      studentId: null,
+    });
+    pulseTeacherTalking(3600);
+    soundEngine.playWhistle();
+    setNotice('Students are playing on the field while Teacher pursues them!');
+  }, [pulseTeacherTalking]);
+
+  const finishOutdoorRecall = useCallback(() => {
+    setRecallingFromField(false);
+    setTeacherPursuitActive(false);
+    setFootballRecallsCount((count) => count + 1);
+    setDialogue({
+      speaker: 'Teacher',
+      text: 'Good! Everyone came back inside through the classroom door to Estate Model High School! (+15 pts)',
+      reply: 'Students are ready—place them into Groups 1–4 to simulate class groups or open the Score Page!',
+      studentId: null,
+      showScoreBtn: true,
+    });
+    soundEngine.playTeacherPraise();
+    setNotice('Everyone is entering through the classroom door (+15 pts)! Place students into Groups 1–4.');
+  }, []);
+
+  const handleReturnStudentFromField = useCallback(
+    (studentId) => {
+      const learner = learners.find((l) => l.id === studentId);
+      setFieldStudentIds((prev) => {
+        const next = prev.filter((id) => id !== studentId);
+        if (next.length === 0 && swingIdsRef.current.length === 0) {
+          finishOutdoorRecall();
+        } else if (learner) {
+          setNotice(`${learner.name.split(' ')[0]} walked in through the classroom door!`);
+        }
+        return next;
+      });
+    },
+    [finishOutdoorRecall],
+  );
+
+  const handleReturnStudentFromSwing = useCallback(
+    (studentId) => {
+      const learner = learners.find((l) => l.id === studentId);
+      setSwingStudentIds((prev) => {
+        const next = prev.filter((id) => id !== studentId);
+        if (next.length === 0 && fieldIdsRef.current.length === 0) {
+          finishOutdoorRecall();
+        } else if (learner) {
+          setNotice(`${learner.name.split(' ')[0]} left the swing and entered through the classroom door!`);
+        }
+        return next;
+      });
+    },
+    [finishOutdoorRecall],
+  );
+
+  const handleGoalScored = useCallback((scorerName) => {
+    setGoalsScored((count) => count + 1);
+    setLastGoalScorer(scorerName);
+    setNotice(`GOAL! ${scorerName} scored on the Estate Model High School pitch (+15 pts)!`);
   }, []);
 
   const startQuestionRound = useCallback(
@@ -209,7 +413,7 @@ function App() {
       setLastAnsweredId(studentId);
       setSelectedLearnerId(studentId);
       setAnsweredInRound((prev) => (prev.includes(studentId) ? prev : [...prev, studentId]));
-      setClassPoints((pts) => pts + 10);
+      setQaAnswersCount((count) => count + 1);
       setDialogue({
         speaker: learner.name,
         text: resp.answer,
@@ -228,6 +432,10 @@ function App() {
   );
 
   const handleTeacherClick = useCallback(() => {
+    if (teacherPursuitActive && (fieldStudentIds.length > 0 || swingStudentIds.length > 0)) {
+      handleRecallAllFromField();
+      return;
+    }
     if (!qaActive) {
       startQuestionRound(false);
       return;
@@ -237,7 +445,16 @@ function App() {
       return;
     }
     startQuestionRound(true);
-  }, [qaActive, raisedHandIds, startQuestionRound, handleAnswerStudent]);
+  }, [
+    teacherPursuitActive,
+    fieldStudentIds.length,
+    swingStudentIds.length,
+    handleRecallAllFromField,
+    qaActive,
+    raisedHandIds,
+    startQuestionRound,
+    handleAnswerStudent,
+  ]);
 
   const handleSendToBoard = useCallback(
     (studentId) => {
@@ -287,7 +504,6 @@ function App() {
         });
         return null;
       });
-      setClassPoints((pts) => pts + 10);
       setDialogue({
         speaker: 'Teacher',
         text: `Well written on the board, ${author}! Everyone can see your notes clearly now.`,
@@ -318,8 +534,9 @@ function App() {
 
       const nextAssignments = { ...assignments, [learnerId]: groupId };
       setAssignments(nextAssignments);
+      setFieldStudentIds((prev) => prev.filter((id) => id !== learnerId));
+      setSwingStudentIds((prev) => prev.filter((id) => id !== learnerId));
       setSelectedLearnerId(null);
-      setClassPoints((pts) => pts + 5);
 
       const learner = learners.find((item) => item.id === learnerId);
       const nextCount = currentMembers.length + 1;
@@ -327,7 +544,7 @@ function App() {
 
       if (totalPlaced === 20) {
         soundEngine.playVictory();
-        setNotice('All 20 learners are standing in groups! Click Review Arrangement.');
+        setNotice('All 20 learners are standing in groups (+25 bonus)! Open Score Page.');
       } else if (nextCount === 5) {
         soundEngine.playGroupComplete();
         setNotice(`Group ${groupId} is complete (5/5)!`);
@@ -358,15 +575,7 @@ function App() {
     startQuestionRound(false);
   }
 
-  function handleReview() {
-    if (!isComplete) {
-      soundEngine.playError();
-      const open = groups
-        .map((g) => `${g.name}: ${membersFor(g.id).length}/5`)
-        .filter((item) => !item.endsWith('5/5'));
-      setNotice(`Seat all 20 learners into groups of 5 first. ${open.join(' · ')}`);
-      return;
-    }
+  function handleOpenScorePage() {
     soundEngine.playVictory();
     setSelectedLearnerId(null);
     setHoveredLearnerId(null);
@@ -385,13 +594,22 @@ function App() {
     setLastAnsweredId(null);
     setBoardTask(null);
     setBoardHistory([]);
+    setQaAnswersCount(0);
+    setGoalsScored(0);
+    setLastGoalScorer(null);
+    setFootballRecallsCount(0);
+    setFieldStudentIds([]);
+    setSwingStudentIds([]);
+    setRecallingFromField(false);
+    setTeacherPursuitActive(false);
     setDialogue(null);
-    setClassPoints(0);
     setNotice('All 20 learners are seated back on their chairs.');
   }
 
   function restart() {
     resetSimulation();
+    setFieldStudentIds(DEFAULT_FIELD_IDS);
+    setSwingStudentIds(DEFAULT_SWING_IDS);
     setProfileIndex(0);
     setCameraPreset('welcome');
     setStage('welcome');
@@ -426,6 +644,10 @@ function App() {
         teacherTalking={teacherTalking}
         boardTask={boardTask}
         boardHistory={boardHistory}
+        fieldStudentIds={stage === 'arrange' || stage === 'welcome' ? fieldStudentIds : []}
+        swingStudentIds={stage === 'arrange' || stage === 'welcome' ? swingStudentIds : []}
+        recallingFromField={recallingFromField}
+        teacherPursuitActive={stage === 'arrange' && teacherPursuitActive}
         onSelectLearner={setSelectedLearnerId}
         onHoverLearner={setHoveredLearnerId}
         onAssignLearner={assignLearner}
@@ -435,6 +657,13 @@ function App() {
         onAnswerStudent={handleAnswerStudent}
         onTeacherClick={handleTeacherClick}
         onWindowClick={handleWindowEscape}
+        onDoorClick={handleDoorClick}
+        onSwingClick={handleSwingClick}
+        onSendToField={handleSendToField}
+        onSendToSwing={handleSendToSwing}
+        onReturnStudentFromField={handleReturnStudentFromField}
+        onReturnStudentFromSwing={handleReturnStudentFromSwing}
+        onGoalScored={handleGoalScored}
       />
 
       {/* Stage 1: Welcome Overlay */}
@@ -634,9 +863,13 @@ function App() {
               <span aria-hidden="true">·</span>
               <span>Groups: <strong>{placedCount} / 20</strong></span>
               <span aria-hidden="true">·</span>
+              <span>Outside: <strong>{outsideCount}</strong></span>
+              <span aria-hidden="true">·</span>
               <span>Board: <strong>{boardHistory.length}</strong></span>
               <span aria-hidden="true">·</span>
-              <span>Points: <strong>{classPoints}</strong></span>
+              <span>Goals: <strong>{goalsScored}</strong></span>
+              <span aria-hidden="true">·</span>
+              <span>Score: <strong>{totalScore}</strong></span>
             </div>
 
             <div className="hud-actions-zone">
@@ -683,11 +916,15 @@ function App() {
                 <div>
                   <strong>{inspectedLearner.name}</strong>
                   <span>
-                    {raisedHandIds.includes(inspectedLearner.id)
-                      ? 'Hand raised · Click to answer or drag to group'
-                      : assignments[inspectedLearner.id]
-                        ? `Standing in Group ${assignments[inspectedLearner.id]}`
-                        : 'Seated on chair · Drag to group or board'}
+                    {swingStudentIds.includes(inspectedLearner.id)
+                      ? 'Swinging on the playground · Click to call inside'
+                      : fieldStudentIds.includes(inspectedLearner.id)
+                        ? 'Playing football on field · Click to call inside'
+                        : raisedHandIds.includes(inspectedLearner.id)
+                          ? 'Hand raised · Click to answer or drag to group'
+                          : assignments[inspectedLearner.id]
+                            ? `Standing in Group ${assignments[inspectedLearner.id]}`
+                            : 'Seated on chair · Drag to group, board, or window'}
                   </span>
                 </div>
               </div>
@@ -779,6 +1016,16 @@ function App() {
                 >
                   Next Question
                 </button>
+
+                {dialogue.showScoreBtn && (
+                  <button
+                    type="button"
+                    className="primary-button dialogue-btn"
+                    onClick={handleOpenScorePage}
+                  >
+                    Score Page <Icon name="chevron" size={14} />
+                  </button>
+                )}
               </div>
             </aside>
           )}
@@ -789,12 +1036,37 @@ function App() {
               <div>
                 <p className="eyebrow">OUTSIDE ESTATE MODEL HIGH SCHOOL</p>
                 <strong>
-                  {cameraPreset === 'field'
-                    ? 'School Sports Field & Vegetation'
-                    : 'Schoolyard Playground & Swings'}
+                  {outsideCount > 0
+                    ? `${swingStudentIds.length} on swings · ${fieldStudentIds.length} playing football${teacherPursuitActive ? ' · Teacher pursuing!' : ''}`
+                    : cameraPreset === 'field'
+                      ? 'School Sports Field & Vegetation'
+                      : 'Schoolyard Playground & Swings'}
                 </strong>
               </div>
               <div className="outdoor-btn-row">
+                <button
+                  type="button"
+                  className="quiet-button dialogue-btn"
+                  onClick={handleSwingClick}
+                >
+                  {swingStudentIds.length > 0 ? 'View Swings' : 'Play on Swings'}
+                </button>
+                <button
+                  type="button"
+                  className="quiet-button dialogue-btn"
+                  onClick={handleStartFieldFootball}
+                >
+                  {teacherPursuitActive ? 'Add Squad & Chase' : 'Teacher Chase'}
+                </button>
+                {outsideCount > 0 && (
+                  <button
+                    type="button"
+                    className="quiet-button dialogue-btn dock-active-qa"
+                    onClick={handleRecallAllFromField}
+                  >
+                    Bring All to Class ({outsideCount})
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`quiet-button dialogue-btn ${cameraPreset === 'field' ? 'dock-active-qa' : ''}`}
@@ -815,6 +1087,13 @@ function App() {
                   onClick={() => setCameraPreset('overview')}
                 >
                   Back Inside Class
+                </button>
+                <button
+                  type="button"
+                  className="quiet-button dialogue-btn"
+                  onClick={handleOpenScorePage}
+                >
+                  Score Page
                 </button>
               </div>
             </aside>
@@ -887,6 +1166,26 @@ function App() {
                   <span>Write: {boardCandidate.name.split(' ')[0]}</span>
                 </button>
 
+                <button
+                  type="button"
+                  className="quiet-button dock-small-btn"
+                  onClick={handleStartFieldFootball}
+                  title="Send more students out through the window to play football while Teacher pursues them"
+                >
+                  <span>Football Chase</span>
+                </button>
+
+                {outsideCount > 0 && (
+                  <button
+                    type="button"
+                    className="quiet-button dock-small-btn dock-active-qa"
+                    onClick={handleRecallAllFromField}
+                    title="Have Teacher and all students on the swings & field come inside through the classroom door to join Groups 1–4"
+                  >
+                    <span>Recall via Door ({outsideCount})</span>
+                  </button>
+                )}
+
                 <div className="dock-cam-group" role="group" aria-label="Camera views">
                   <span className="dock-cam-icon"><Icon name="camera" size={14} /></span>
                   {(['overview', 'board', 'chairs', 'groups', 'field', 'playground']).map((preset) => (
@@ -943,9 +1242,9 @@ function App() {
                 <button
                   type="button"
                   className="primary-button dock-review-btn"
-                  onClick={handleReview}
+                  onClick={handleOpenScorePage}
                 >
-                  <span>Review</span>
+                  <span>Score Page</span>
                   <Icon name="chevron" size={16} />
                 </button>
               </div>
@@ -954,34 +1253,35 @@ function App() {
         </>
       )}
 
-      {/* Stage 4: Results Overlay over the Celebrating 3D Groups */}
+      {/* Stage 4: Final Score Page (Class + Football Scene) */}
       {stage === 'results' && (
-        <section className="overlay-center" aria-label="Simulation results">
+        <section className="overlay-center" aria-label="Estate Model High School score page">
           <div className="results-modal-card">
             <header className="results-heading">
               <div className="heading-icon trophy"><span>✦</span></div>
               <div>
-                <p className="eyebrow">SIMULATION COMPLETE</p>
-                <h1>Your 3D classroom groups</h1>
+                <p className="eyebrow">ESTATE MODEL HIGH SCHOOL · FINAL SCORE</p>
+                <h1>Class &amp; Play Field Scoreboard</h1>
               </div>
               <div className="heading-spacer" />
-              <IconButton label="Read your results aloud" onClick={speakCurrentScene}>
+              <IconButton label="Read your score page aloud" onClick={speakCurrentScene}>
                 <Icon name="speaker" />
               </IconButton>
             </header>
 
             <div className="results-content">
               <div className="success-card">
-                <div className="success-star"><Icon name="star" size={30} /></div>
-                <p className="eyebrow">CLASSROOM ARRANGEMENT</p>
-                <h2>Well done!</h2>
-                <p className="success-copy">
-                  All 20 learners stood up from their chairs and formed four balanced groups of five while sharing ideas with their teacher and writing on the board.
-                </p>
+                <div className="success-star"><Icon name="star" size={28} /></div>
+                <span className="score-rank-pill">Rank {scoreRank.grade} · {scoreRank.label}</span>
+                <div className="score-total-hero">
+                  <strong>{totalScore}</strong>
+                  <span>Total Points</span>
+                </div>
+                <p className="success-copy">{scoreRank.summary}</p>
                 <div className="success-stats">
-                  <div><strong>20</strong><span>Standing</span></div>
-                  <div><strong>4 × 5</strong><span>Groups</span></div>
-                  <div><strong>{classPoints}</strong><span>Points</span></div>
+                  <div><strong>{qaAnswersCount + boardHistory.length}</strong><span>Class Tasks</span></div>
+                  <div><strong>{goalsScored}</strong><span>Goals Scored</span></div>
+                  <div><strong>{placedCount}/20</strong><span>In Groups</span></div>
                 </div>
                 <div className="results-btn-stack">
                   <button
@@ -989,10 +1289,10 @@ function App() {
                     type="button"
                     onClick={() => {
                       setStage('arrange');
-                      setCameraPreset('groups');
+                      setCameraPreset(isComplete ? 'groups' : 'overview');
                     }}
                   >
-                    Inspect 3D Room
+                    Back to 3D Room
                   </button>
                   <button className="quiet-button" type="button" onClick={restart}>
                     <Icon name="reset" size={15} /> Play Again
@@ -1002,28 +1302,59 @@ function App() {
 
               <div className="takeaways-card">
                 <div className="takeaways-title">
-                  <span className="takeaway-bulb"><Icon name="lightbulb" size={20} /></span>
-                  <h2>Key takeaways</h2>
+                  <span className="takeaway-bulb"><Icon name="lightbulb" size={19} /></span>
+                  <h2>Activity Score Breakdown</h2>
                 </div>
-                <div className="takeaway-item">
-                  <span className="check-mark"><Icon name="check" size={14} /></span>
-                  <p>Consider different learner characteristics, including ability, behaviour and social skills.</p>
+
+                <div className="score-breakdown-list">
+                  <div className="score-row">
+                    <div>
+                      <strong>Civic Education Q&amp;A</strong>
+                      <small>{qaAnswersCount} {qaAnswersCount === 1 ? 'answer' : 'answers'} · 10 pts each</small>
+                    </div>
+                    <span className="score-pts">+{qaScore} pts</span>
+                  </div>
+
+                  <div className="score-row">
+                    <div>
+                      <strong>Chalkboard Writing</strong>
+                      <small>{boardHistory.length} {boardHistory.length === 1 ? 'note' : 'notes'} written · 10 pts each</small>
+                    </div>
+                    <span className="score-pts">+{boardScore} pts</span>
+                  </div>
+
+                  <div className="score-row">
+                    <div>
+                      <strong>Play Field Football &amp; Recall</strong>
+                      <small>
+                        {goalsScored} {goalsScored === 1 ? 'goal' : 'goals'}
+                        {lastGoalScorer ? ` (last: ${lastGoalScorer})` : ''} · {footballRecallsCount} {footballRecallsCount === 1 ? 'recall' : 'recalls'}
+                      </small>
+                    </div>
+                    <span className="score-pts">+{footballScore} pts</span>
+                  </div>
+
+                  <div className="score-row">
+                    <div>
+                      <strong>Classroom Grouping</strong>
+                      <small>{placedCount}/20 standing{isComplete ? ' · +25 full class bonus' : ''}</small>
+                    </div>
+                    <span className="score-pts">+{groupScore} pts</span>
+                  </div>
                 </div>
-                <div className="takeaway-item">
-                  <span className="check-mark"><Icon name="check" size={14} /></span>
-                  <p>Aim for balanced groups, while making room for different strengths and perspectives.</p>
+
+                <div className="score-takeaway-note">
+                  <span className="check-mark"><Icon name="check" size={12} /></span>
+                  <p>Civic teamwork shines both when learners share ideas on the board and when they return fairly from the pitch.</p>
                 </div>
-                <div className="takeaway-item">
-                  <span className="check-mark"><Icon name="check" size={14} /></span>
-                  <p>Invite learners to answer aloud and share ideas on the board to build confidence across groups.</p>
-                </div>
+
                 <div className="group-summary-list">
                   {groupInsights.map((group) => (
                     <div className="group-summary" key={group.id}>
                       <span className="summary-dot" />
                       <strong>{group.name}</strong>
                       <span>
-                        {group.members.length} standing · {group.abilityMix} ability levels · {group.styleMix} styles
+                        {group.members.length}/5 standing · {group.abilityMix} abilities · {group.styleMix} styles
                       </span>
                     </div>
                   ))}
@@ -1037,7 +1368,9 @@ function App() {
                   draggable={false}
                   referrerPolicy="no-referrer"
                 />
-                <div className="photo-overlay-caption">Every learner has something to contribute.</div>
+                <div className="photo-overlay-caption">
+                  Estate Model High School · Civic pride in class &amp; fair play on the field.
+                </div>
               </div>
             </div>
           </div>

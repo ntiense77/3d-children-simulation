@@ -8,7 +8,10 @@ export type StudentActionMode =
   | 'walking'
   | 'writing_board'
   | 'raising_hand'
-  | 'answering';
+  | 'answering'
+  | 'jumping_window'
+  | 'playing_football'
+  | 'swinging';
 
 export interface StudentRig {
   root: THREE.Group;
@@ -28,6 +31,7 @@ export interface StudentRig {
   poseBlend: number; // 0 = seated, 1 = standing
   raiseBlend: number; // 0 = lowered, 1 = raised hand
   writeBlend: number; // 0 = idle, 1 = writing on board
+  kickBlend: number; // > 0 = ball kick swing
   walkCycle: number;
   bounce: number;
   phaseOffset: number;
@@ -344,6 +348,7 @@ export function createStudentRig(
     poseBlend: 0,
     raiseBlend: 0,
     writeBlend: 0,
+    kickBlend: 0,
     walkCycle: 0,
     bounce: 0,
     phaseOffset: index * 0.65,
@@ -358,9 +363,11 @@ export function updateStudentPose(
   isSelected: boolean,
   elapsed: number,
   delta: number,
+  swingAngle = 0,
 ) {
+  const isSwinging = actionMode === 'swinging' && !isDragging;
   const targetPose =
-    actionMode === 'seated' && !isDragging
+    (actionMode === 'seated' || isSwinging) && !isDragging
       ? 0
       : isDragging
         ? 0.72
@@ -371,10 +378,14 @@ export function updateStudentPose(
   rig.poseBlend = THREE.MathUtils.damp(rig.poseBlend, targetPose, 11, delta);
   rig.raiseBlend = THREE.MathUtils.damp(rig.raiseBlend, targetRaise, 12, delta);
   rig.writeBlend = THREE.MathUtils.damp(rig.writeBlend, targetWrite, 12, delta);
+  rig.kickBlend = THREE.MathUtils.damp(rig.kickBlend, 0, 9, delta);
   rig.bounce = THREE.MathUtils.damp(rig.bounce, 0, 8, delta);
 
-  if (actionMode === 'walking') {
-    rig.walkCycle += delta * 9.5;
+  const isRunning = actionMode === 'playing_football';
+  const isMoving = actionMode === 'walking' || isRunning;
+
+  if (isMoving) {
+    rig.walkCycle += delta * (isRunning ? 13.0 : 9.5);
   } else {
     rig.walkCycle = THREE.MathUtils.damp(rig.walkCycle, Math.round(rig.walkCycle / Math.PI) * Math.PI, 8, delta);
   }
@@ -383,9 +394,14 @@ export function updateStudentPose(
   const r = rig.raiseBlend;
   const w = rig.writeBlend;
   const idleWave = Math.sin(elapsed * 2.1 + rig.phaseOffset);
-  const walkSwing = actionMode === 'walking' ? Math.sin(rig.walkCycle) * 0.45 : 0;
-  const walkBob = actionMode === 'walking' ? Math.abs(Math.sin(rig.walkCycle)) * 0.035 : 0;
+  const walkSwing = isMoving ? Math.sin(rig.walkCycle) * (isRunning ? 0.68 : 0.45) : 0;
+  const walkBob = isMoving ? Math.abs(Math.sin(rig.walkCycle)) * (isRunning ? 0.055 : 0.035) : 0;
   const answerNod = actionMode === 'answering' ? Math.sin(elapsed * 7.5) * 0.08 : 0;
+  const isJumping = actionMode === 'jumping_window';
+
+  rig.bodyPivot.rotation.x = isSwinging
+    ? swingAngle
+    : THREE.MathUtils.damp(rig.bodyPivot.rotation.x, 0, 12, delta);
 
   // Pelvis height: seated = 0.39, standing = 0.45 + drag lift + bounce + walk bob
   const hipY =
@@ -395,28 +411,45 @@ export function updateStudentPose(
     walkBob;
   rig.hipsPivot.position.y = hipY;
 
-  // Legs (seated bent, standing upright, walking swing, dragging dangle)
-  const baseHipPitch = THREE.MathUtils.lerp(-Math.PI / 2, 0, p);
+  // Legs (seated bent, swinging pump, standing upright, running/walking swing, kicking, or window vault)
+  const swingPump = isSwinging ? THREE.MathUtils.clamp(-swingAngle * 1.4, -0.7, 0.85) : 0;
+  const baseHipPitch = THREE.MathUtils.lerp(-Math.PI / 2 + swingPump * 0.28, 0, p);
   const dragLegSwing = isDragging ? Math.sin(elapsed * 9 + rig.phaseOffset) * 0.14 : 0;
-  rig.leftHip.rotation.x = baseHipPitch + dragLegSwing + walkSwing;
-  rig.rightHip.rotation.x = baseHipPitch - dragLegSwing - walkSwing;
+  const jumpTuck = isJumping ? -0.75 : 0;
+  const kickAngle = -rig.kickBlend * 1.15;
 
-  const baseKneePitch = THREE.MathUtils.lerp(Math.PI / 2, 0, p);
+  rig.leftHip.rotation.x = baseHipPitch + dragLegSwing + walkSwing + jumpTuck;
+  rig.rightHip.rotation.x = baseHipPitch - dragLegSwing - walkSwing + jumpTuck + kickAngle;
+
+  const swingKneePitch = isSwinging
+    ? THREE.MathUtils.clamp(Math.PI / 2 - swingPump * 1.05, 0.2, 1.85)
+    : Math.PI / 2;
+  const baseKneePitch = THREE.MathUtils.lerp(swingKneePitch, 0, p);
   rig.leftKnee.rotation.x =
-    baseKneePitch + (actionMode === 'walking' ? Math.max(0, -walkSwing) * 0.65 : 0);
+    baseKneePitch + (isMoving ? Math.max(0, -walkSwing) * 0.72 : 0) + (isJumping ? 1.1 : 0);
   rig.rightKnee.rotation.x =
-    baseKneePitch + (actionMode === 'walking' ? Math.max(0, walkSwing) * 0.65 : 0);
+    baseKneePitch + (isMoving ? Math.max(0, walkSwing) * 0.72 : 0) + (isJumping ? 1.1 : 0);
 
-  // Left arm
-  const baseArmPitch = isDragging
-    ? -0.65
-    : THREE.MathUtils.lerp(-0.42, -0.08 + idleWave * 0.05, p);
-  rig.leftShoulder.rotation.x = baseArmPitch - walkSwing * 0.75;
-  rig.leftShoulder.rotation.z = isDragging ? 0.35 : THREE.MathUtils.lerp(0.08, 0.14, p);
+  // Left arm (gripping chain on swing, dragging, or normal idle/walk)
+  const baseArmPitch = isSwinging
+    ? -2.42
+    : isDragging || isJumping
+      ? -0.95
+      : THREE.MathUtils.lerp(-0.42, -0.08 + idleWave * 0.05, p);
+  rig.leftShoulder.rotation.x = baseArmPitch - walkSwing * 0.78;
+  rig.leftShoulder.rotation.z = isSwinging
+    ? 0.06
+    : isDragging || isJumping
+      ? 0.42
+      : THREE.MathUtils.lerp(0.08, 0.14, p);
 
-  // Right arm (handles idle/walk, raised hand to answer, and chalk writing!)
-  let rightPitch = baseArmPitch + walkSwing * 0.75;
-  let rightRoll = isDragging ? -0.35 : -THREE.MathUtils.lerp(0.08, 0.14, p);
+  // Right arm (handles swing chain grip, idle/walk, raised hand to answer, and chalk writing!)
+  let rightPitch = baseArmPitch + walkSwing * 0.78;
+  let rightRoll = isSwinging
+    ? -0.06
+    : isDragging || isJumping
+      ? -0.42
+      : -THREE.MathUtils.lerp(0.08, 0.14, p);
 
   if (r > 0.02) {
     // Excited raised right hand waving gently!
@@ -440,9 +473,11 @@ export function updateStudentPose(
 
   // Head
   rig.headPivot.rotation.y =
-    w > 0.3 ? Math.sin(elapsed * 4) * 0.08 : idleWave * 0.08;
+    w > 0.3 ? Math.sin(elapsed * 4) * 0.08 : idleWave * (isSwinging ? 0.14 : 0.08);
   rig.headPivot.rotation.x =
-    THREE.MathUtils.lerp(0.05, -0.03, p) + answerNod + (w > 0.3 ? -0.14 : 0);
+    (isSwinging ? -0.1 + swingAngle * 0.22 : THREE.MathUtils.lerp(0.05, -0.03, p)) +
+    answerNod +
+    (w > 0.3 ? -0.14 : 0);
 
   // Hand-raise golden beacon
   const badgeMatInst = rig.handBadge.material as THREE.MeshStandardMaterial;
@@ -705,12 +740,13 @@ export function updateTeacherPose(
   isWalking: boolean,
   isTalking: boolean,
   isPointingBoard: boolean,
+  isPursuing: boolean,
   isHovered: boolean,
   elapsed: number,
   delta: number,
 ) {
   if (isWalking) {
-    rig.walkCycle += delta * 7.8;
+    rig.walkCycle += delta * (isPursuing ? 11.2 : 7.8);
   } else {
     rig.walkCycle = THREE.MathUtils.damp(
       rig.walkCycle,
@@ -720,12 +756,12 @@ export function updateTeacherPose(
     );
   }
 
-  rig.gestureAmount = THREE.MathUtils.damp(rig.gestureAmount, isTalking ? 1 : 0, 10, delta);
+  rig.gestureAmount = THREE.MathUtils.damp(rig.gestureAmount, isTalking || isPursuing ? 1 : 0, 10, delta);
   rig.pointBlend = THREE.MathUtils.damp(rig.pointBlend, isPointingBoard ? 1 : 0, 10, delta);
   rig.nodAmount = THREE.MathUtils.damp(rig.nodAmount, 0, 7, delta);
 
-  const walkSwing = isWalking ? Math.sin(rig.walkCycle) * 0.36 : 0;
-  const walkBob = isWalking ? Math.abs(Math.sin(rig.walkCycle)) * 0.03 : 0;
+  const walkSwing = isWalking ? Math.sin(rig.walkCycle) * (isPursuing ? 0.56 : 0.36) : 0;
+  const walkBob = isWalking ? Math.abs(Math.sin(rig.walkCycle)) * (isPursuing ? 0.048 : 0.03) : 0;
   const g = rig.gestureAmount;
   const pt = rig.pointBlend;
 
@@ -738,21 +774,23 @@ export function updateTeacherPose(
   rig.leftShoulder.rotation.x = -0.62 - walkSwing * 0.3;
   rig.leftShoulder.rotation.z = 0.12;
 
-  // Right arm holds the teaching cane: points directly at the blackboard when teaching at board,
-  // or gestures expressively while patrolling and conversing with students
+  // Right arm holds the teaching cane: points at blackboard, waves urgently when pursuing students on field,
+  // or gestures expressively while teaching
   const idleRightX = -0.14 + Math.sin(elapsed * 1.9) * 0.04 + walkSwing * 0.45;
-  const talkRightX = -0.88 + Math.sin(elapsed * 5.2) * 0.18;
+  const talkRightX = isPursuing
+    ? -1.45 + Math.sin(elapsed * 8.5) * 0.32
+    : -0.88 + Math.sin(elapsed * 5.2) * 0.18;
   const pointRightX = -1.62 + Math.sin(elapsed * 2.8) * 0.12;
 
   const baseRightX = THREE.MathUtils.lerp(idleRightX, talkRightX, g);
   rig.rightShoulder.rotation.x = THREE.MathUtils.lerp(baseRightX, pointRightX, pt);
 
-  const baseRightZ = THREE.MathUtils.lerp(-0.1, -0.26, g);
+  const baseRightZ = THREE.MathUtils.lerp(-0.1, isPursuing ? -0.45 : -0.26, g);
   const pointRightZ = -0.16 + Math.cos(elapsed * 2.1) * 0.14;
   rig.rightShoulder.rotation.z = THREE.MathUtils.lerp(baseRightZ, pointRightZ, pt);
 
-  // Subtle cane tilt so tip aims cleanly forward/up toward board lines
-  rig.caneGroup.rotation.x = THREE.MathUtils.lerp(0.55, -0.18, pt);
+  // Subtle cane tilt so tip aims cleanly forward/up toward board lines or waves during pursuit
+  rig.caneGroup.rotation.x = THREE.MathUtils.lerp(isPursuing ? 0.1 : 0.55, -0.18, pt);
 
   rig.headPivot.rotation.x =
     (isPointingBoard
